@@ -1,72 +1,64 @@
-
 import pulp
 import pandas as pd
 
-profesionales = ["Ana", "Carlos", "Laura", "Miguel", "Sofía", "Andrés"]
-tareas = ["T1", "T2", "T3", "T4", "T5", "T6"]
+# Datos originales de la Tabla 1
+profesionales = ['Ana', 'Carlos', 'Laura', 'Miguel', 'Sofía', 'Andrés']
+tareas = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6']
 
-tiempos = [
-    [12, 18, 15, 20, 14, 16],
-    [16, 11, 19, 14, 17, 13],
-    [14, 16, 10, 18, 15, 17],
-    [18, 13, 16, 11, 19, 15],
-    [15, 17, 14, 16, 9, 18],
-    [17, 14, 18, 15, 16, 10]
-]
-
-modelo = pulp.LpProblem("Asignacion_JFV", pulp.LpMinimize)
-
-x = {
-    (i, j): pulp.LpVariable(
-        f"x_{i}_{j}", cat="Binary"
-    )
-    for i in range(6)
-    for j in range(6)
+tiempos_originales = {
+    'Ana':    {'T1': 12, 'T2': 18, 'T3': 15, 'T4': 20, 'T5': 14, 'T6': 16},
+    'Carlos': {'T1': 16, 'T2': 11, 'T3': 19, 'T4': 14, 'T5': 17, 'T6': 13},
+    'Laura':  {'T1': 14, 'T2': 16, 'T3': 10, 'T4': 18, 'T5': 15, 'T6': 17},
+    'Miguel': {'T1': 18, 'T2': 13, 'T3': 16, 'T4': 11, 'T5': 19, 'T6': 15},
+    'Sofía':  {'T1': 15, 'T2': 17, 'T3': 14, 'T4': 16, 'T5': 9,  'T6': 18},
+    'Andrés': {'T1': 17, 'T2': 14, 'T3': 18, 'T4': 15, 'T5': 16, 'T6': 10}
 }
 
-# Funcion objetivo
-modelo += pulp.lpSum(
-    tiempos[i][j] * x[i, j]
-    for i in range(6)
-    for j in range(6)
-)
+# Crear el problema de optimización sin sumar 1000
+prob = pulp.LpProblem('Asignacion_Tareas_JFV_Original', pulp.LpMinimize)
 
-# Cada tarea recibe exactamente un profesional
-for j in range(6):
-    modelo += pulp.lpSum(
-        x[i, j] for i in range(6)
-    ) == 1
+# Definir variables de decisión binarias
+x = pulp.LpVariable.dicts('Asignacion', ((p, t) for p in profesionales for t in tareas), cat='Binary')
 
-# Cada profesional recibe exactamente una tarea
-for i in range(6):
-    modelo += pulp.lpSum(
-        x[i, j] for j in range(6)
-    ) == 1
+# Función Objetivo: Minimizar la suma de tiempos originales
+prob += pulp.lpSum(tiempos_originales[p][t] * x[p, t] for p in profesionales for t in tareas)
 
-# Restricciones adicionales
-modelo += x[0, 3] == 0  # Ana no puede T4
-modelo += x[1, 2] == 0  # Carlos no puede T3
-modelo += x[4, 4] == 1  # Sofia debe realizar T5
+# Restricciones:
+# 1. Cada profesional debe recibir exactamente una tarea
+for p in profesionales:
+    prob += pulp.lpSum(x[p, t] for t in tareas) == 1
 
-# Resolver
-modelo.solve(pulp.PULP_CBC_CMD(msg=False))
+# 2. Cada tarea debe asignarse exactamente a un profesional
+for t in tareas:
+    prob += pulp.lpSum(x[p, t] for p in profesionales) == 1
 
-print("Estado:", pulp.LpStatus[modelo.status])
+# 3. Condiciones adicionales
+# Ana no cuenta con la certificación requerida para ejecutar T4
+prob += x['Ana', 'T4'] == 0
 
-if modelo.status == pulp.LpStatusOptimal:
-    resultados = []
+# Carlos no estará disponible para ejecutar T3
+prob += x['Carlos', 'T3'] == 0
 
-    for i in range(6):
-        for j in range(6):
-            if pulp.value(x[i, j]) > 0.5:
-                resultados.append({
-                    "Profesional": profesionales[i],
-                    "Tarea": tareas[j],
-                    "Horas": tiempos[i][j]
-                })
+# T5 debe asignarse a Sofía debido a su experiencia especializada
+prob += x['Sofía', 'T5'] == 1
 
-    df = pd.DataFrame(resultados)
-    print(df.to_string(index=False))
-    print("Total minimo:", pulp.value(modelo.objective), "horas")
-else:
-    print("No existe una solucion optima factible.")
+# Resolver el modelo utilizando el solver por defecto (CBC)
+status = prob.solve()
+
+# Estructurar y mostrar resultados
+resultados = []
+for p in profesionales:
+    for t in tareas:
+        if pulp.value(x[p, t]) == 1:
+            resultados.append({
+                'Profesional': p,
+                'Tarea': t,
+                'Tiempo Original (h)': tiempos_originales[p][t]
+            })
+
+df_resultados = pd.DataFrame(resultados)
+
+print(f"Estado de la solución: {pulp.LpStatus[status]}")
+print(f"Suma mínima de horas de trabajo total (original): {pulp.value(prob.objective)} horas")
+print("\nAsignación Óptima:")
+print(df_resultados.to_markdown(index=False))
